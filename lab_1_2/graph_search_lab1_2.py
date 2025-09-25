@@ -330,7 +330,7 @@ class GraphSearchApp(ttk.Frame):
         if not path: return
         if path.endswith('.json'):
             data={'nodes':[],'edges':[]}
-            for n in self.G.nodes(): data['nodes'].append({'id':n,'pos':self.pos.get(n,(0,0))})
+            for n in self.G.nodes(): data['nodes'].append({'id':n,'pos':list(self.pos.get(n,(0,0)))})
             for u,v,d in self.G.edges(data=True): data['edges'].append({'u':u,'v':v,'directed': d.get('directed',True)})
             with open(path,'w',encoding='utf-8') as f: json.dump(data,f,indent=2)
             self.append_result(f"Saved {path}")
@@ -347,7 +347,6 @@ class GraphSearchApp(ttk.Frame):
                 with open(path,'r',encoding='utf-8') as f: data=json.load(f)
                 self.push_undo(); G=nx.DiGraph(); pos={}
                 for n in data.get('nodes',[]): G.add_node(n['id']); pos[n['id']]=tuple(n.get('pos',(0,0)))
-                for e in data.get('edges',[]): u=e['u']; v=e['v']; directed=e.get('directed',True)
                 for e in data.get('edges',[]):
                     u=e['u']; v=e['v']; directed=e.get('directed',True)
                     if directed: G.add_edge(u,v,directed=True)
@@ -369,31 +368,43 @@ class GraphSearchApp(ttk.Frame):
     def run_experiments(self):
         if self.G is None: messagebox.showwarning("No graph\n","Generate a graph\n"); return
         n=max(5,int(self.node_count.get())); m=max(n-1,int(self.edge_count.get())); results=[]
-        tree=ensure_connected_graph(n,n-1,directed=False); und=ensure_connected_graph(n,m,directed=False); dirg=ensure_connected_graph(n,m,directed=True)
-        variants=[('Tree',tree),('Undirected',und),('Directed',dirg)]
+        variants=[('Tree',ensure_connected_graph(n,n-1,directed=False)),
+                  ('Undirected',ensure_connected_graph(n,m,directed=False)),
+                  ('Directed',ensure_connected_graph(n,m,directed=True))]
+        orders=['given','ascending','descending','random']
+        
+        self.append_result("Running experiments...\n")
+        
         for name,g in variants:
             for algo in ('DFS','BFS'):
-                start=0; goal=n-1
-                _start_time = time.time()
-                gen = dfs_generator(g,start,goal,neighbor_order=self.neighbor_order.get()) if algo=='DFS' else bfs_generator(g,start,goal,neighbor_order=self.neighbor_order.get())
-                found=False; pathlen=0; opened=0
-                for state in gen:
-                    if state.get('action')=='found':
-                        found=True; pathlen=len(state.get('path',[])); opened=state.get('opened',0); break
-                    if state.get('action')=='not_found':
-                        found=False; opened=state.get('opened',0); break
-                duration = time.time() - _start_time
-                results.append({'variant':name,'algo':algo,'found':found,'pathlen':pathlen,'opened':opened, 'time':duration})
-        self.experiments=results; self.append_result("Experiments:\n"); 
-        for r in results: self.append_result(f"{r['variant']:10s} | {r['algo']:3s} | found={r['found']} | pathlen={r['pathlen']} | opened={r['opened']} | time={r['time']:.4f}s\n")
+                for order in orders:
+                    start=0; goal=n-1
+                    
+                    gen = dfs_generator(g,start,goal,neighbor_order=order) if algo=='DFS' else bfs_generator(g,start,goal,neighbor_order=order)
+                    
+                    found=False; pathlen=0; opened=0
+                    for state in gen:
+                        if state.get('action')=='found':
+                            found=True; pathlen=len(state.get('path',[])); opened=state.get('opened',0); break
+                        if state.get('action')=='not_found':
+                            found=False; opened=state.get('opened',0); break
+                    
+                    results.append({'variant':name,'algo':algo,'order':order,'found':found,'pathlen':pathlen,'opened':opened})
+        
+        self.experiments=results; 
+        self.append_result("\nExperiments results:\n")
+        self.append_result(f"{'Variant':<10} | {'Algo':<4} | {'Order':<10} | {'Found':<5} | {'PathLen':<7} | {'Opened':<6}")
+        for r in results: 
+            self.append_result(f"{r['variant']:10s} | {r['algo']:4s} | {r['order']:<10} | {str(r['found']):<5s} | {r['pathlen']:<7} | {r['opened']:<6}")
 
     def export_experiments_csv(self):
         if not hasattr(self,'experiments') or not self.experiments: messagebox.showwarning('No data','Run experiments'); return
         path = filedialog.asksaveasfilename(defaultextension='.csv', filetypes=[('CSV','*.csv')])
         if not path: return
-        keys=['variant','algo','found','pathlen','opened','time']
+        keys=['variant','algo','order','found','pathlen','opened']
         try:
-            with open(path,'w',newline='',encoding='utf-8') as f: writer=csv.DictWriter(f, fieldnames=keys); writer.writeheader(); writer.writerows(self.experiments)
+            with open(path,'w',newline='',encoding='utf-8') as f: 
+                writer=csv.DictWriter(f, fieldnames=keys, delimiter=';'); writer.writeheader(); writer.writerows(self.experiments)
             self.append_result(f"Exported to {path}\n")
         except Exception as e: messagebox.showerror('Save error', str(e))
 
